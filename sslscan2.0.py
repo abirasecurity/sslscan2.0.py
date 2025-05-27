@@ -656,30 +656,43 @@ def write_json_output(results, filename):
     print(f"{Fore.GREEN}[+] Results written to JSON file: {filename}")
 
 def write_csv_output(results, filename):
-    """Write scan results to a CSV file"""
-    # Determine all possible fields from all results
-    fieldnames = set()
-    for result in results:
-        for key in result.keys():
-            fieldnames.add(key)
+    """Write scan results to a CSV file in a simplified, grep-friendly format"""
+    fieldnames = ["target", "scan_type", "is_vulnerable"]
 
-    fieldnames = sorted(list(fieldnames))
-
-    with open(filename, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(fieldnames)  # Write header
 
         for result in results:
-            # Convert complex data structures to strings for CSV
-            row = {}
-            for key, value in result.items():
-                if isinstance(value, dict) or isinstance(value, list):
-                    row[key] = str(value)
-                elif key == "expiration_date" and value:
-                    row[key] = value.isoformat()
-                else:
-                    row[key] = value
-            writer.writerow(row)
+            target = result.get("target", "unknown")
+
+            # Add SWEET32 (3DES) vulnerability
+            sweet32_vulnerable = "yes" if result.get("sweet32_vulnerable", False) else "no"
+            writer.writerow([target, "SWEET32 (3DES)", sweet32_vulnerable])
+
+            # Add Bar Mitzvah (RC4) vulnerability
+            rc4_vulnerable = "yes" if result.get("rc4_vulnerable", False) else "no"
+            writer.writerow([target, "Bar Mitzvah (RC4)", rc4_vulnerable])
+
+            # Add TLSv1.0 vulnerability
+            tlsv1_vulnerable = "yes" if result.get("tlsv1_vulnerable", False) else "no"
+            writer.writerow([target, "TLSv1.0", tlsv1_vulnerable])
+
+            # Add TLSv1.1 vulnerability
+            tlsv1_1_vulnerable = "yes" if result.get("tlsv1_1_vulnerable", False) else "no"
+            writer.writerow([target, "TLSv1.1", tlsv1_1_vulnerable])
+
+            # Add weak signature vulnerability
+            weak_sig_vulnerable = "yes" if result.get("weak_signature_vulnerable", False) else "no"
+            writer.writerow([target, "Weak Signature", weak_sig_vulnerable])
+
+            # Add self-signed certificate vulnerability
+            self_signed = "yes" if result.get("self_signed", False) else "no"
+            writer.writerow([target, "Self-Signed Certificate", self_signed])
+
+            # Add expired certificate vulnerability
+            expired = "yes" if result.get("expired", False) else "no"
+            writer.writerow([target, "Expired Certificate", expired])
 
     print(f"{Fore.GREEN}[+] Results written to CSV file: {filename}")
 
