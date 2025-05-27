@@ -51,16 +51,10 @@ brew install sslscan
 3. Install required Python packages:
 
 ```
-pip install colorama
-```
-
-4. Install required Python packages:
-
-```
 pip install colorama pyyaml
 ```
 
-5. Download the script and make it executable:
+4. Download the script and make it executable:
 
 ```
 chmod +x sslscan2.0.py
