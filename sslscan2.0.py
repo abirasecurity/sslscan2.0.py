@@ -132,6 +132,28 @@ def parse_sslscan_output(output):
                 if protocol not in sweet32_vulnerable_by_protocol:
                     sweet32_vulnerable_by_protocol[protocol] = []
                 sweet32_vulnerable_by_protocol[protocol].append(cipher_info)
+                
+    # Check for self-signed certificate
+    cert_section = re.search(r'SSL Certificate:(.*?)(?:\n\n|\Z)', output, re.DOTALL)
+
+    subject = None
+    issuer = None
+    self_signed = False
+
+    if cert_section:
+        cert_info = cert_section.group(1)
+
+        # Extract Subject and Issuer
+        subject_match = re.search(r'Subject:\s*(.*?)(?:\n|$)', cert_info)
+        issuer_match = re.search(r'Issuer:\s*(.*?)(?:\n|$)', cert_info)
+
+        if subject_match and issuer_match:
+            subject = subject_match.group(1).strip()
+            issuer = issuer_match.group(1).strip()
+
+            # Compare Subject and Issuer
+            self_signed = (subject == issuer)
+
 
     return {
         "all_ciphers": all_ciphers,
@@ -140,7 +162,10 @@ def parse_sslscan_output(output):
         "sweet32_vulnerable_by_protocol": sweet32_vulnerable_by_protocol,
         "signature_algorithm": signature_algorithm,
         "tls10_enabled": tls10_enabled,
-        "tls11_enabled": tls11_enabled
+        "tls11_enabled": tls11_enabled,
+        "self_signed": self_signed,
+        "subject": subject,
+        "issuer": issuer
     }
 
 def scan_target(ip, port, scan_types):
@@ -197,6 +222,12 @@ def scan_target(ip, port, scan_types):
         # Check for TLSv1.1 support
         if "tls11" in scan_types:
             result["tls11_enabled"] = parsed_data["tls11_enabled"]
+        
+        # Check for self-signed certificate
+        if "self_signed" in scan_types:
+            result["self_signed"] = parsed_data["self_signed"]
+            result["subject"] = parsed_data["subject"]
+            result["issuer"] = parsed_data["issuer"]
 
         return result
 
@@ -217,6 +248,7 @@ def print_scan_results(results, show_all_ciphers=False, remediation_mode=False):
     weak_signature_results = []
     tls10_results = []
     tls11_results = []
+    self_signed_results = []
 
     # Count statistics
     total_targets = len(results)
@@ -244,6 +276,9 @@ def print_scan_results(results, show_all_ciphers=False, remediation_mode=False):
 
         if "tls11" in scan_types:
             tls11_results.append((target, result.get("tls11_enabled", False), result))
+        
+        if "self_signed" in scan_types:  # Add this block
+            self_signed_results.append((target, result.get("self_signed", False), result))
 
     # Print results for each scan type
     if bar_mitzvah_results:
@@ -260,6 +295,9 @@ def print_scan_results(results, show_all_ciphers=False, remediation_mode=False):
 
     if tls11_results:
         print_tls_results("TLSv1.1", tls11_results, remediation_mode)
+    
+    if self_signed_results:  # Add this block
+        print_self_signed_results(self_signed_results, remediation_mode)
 
     # Print overall summary
     print(f"\n{Fore.BLUE}[+] Overall Scan Summary:{Style.RESET_ALL}")
@@ -354,6 +392,60 @@ def print_vulnerability_results(vuln_name, results, show_all_ciphers, remediatio
     print(f"Total targets: {len(results)}")
     print(f"{Fore.RED}Vulnerable: {vulnerable_count}{Style.RESET_ALL}")
     print(f"{Fore.GREEN}Not vulnerable: {len(results) - vulnerable_count}{Style.RESET_ALL}")
+
+def print_self_signed_results(results, remediation_mode):
+    """Print results for self-signed certificate checks"""
+    vulnerable_count = sum(1 for _, is_self_signed, _ in results if is_self_signed)
+
+    print(f"\n{Fore.BLUE}{'=' * 60}")
+    print(f"{Fore.BLUE}[+] Self-Signed Certificate Scan Results:")
+    print(f"{Fore.BLUE}{'=' * 60}")
+
+    if remediation_mode:
+        print(f"\n{Fore.CYAN}[*] Remediation Test Results:\n")
+
+        # Print vulnerable hosts
+        if vulnerable_count > 0:
+            print(f"{Fore.YELLOW}[!] Hosts still using self-signed certificates:\n")
+            for target, is_self_signed, result in results:
+                if is_self_signed:
+                    print(f"{Fore.YELLOW}    {target} - {Fore.RED}NOT REMEDIATED")
+                    print(f"      Subject: {result['subject']}")
+                    print(f"      Issuer: {result['issuer']}")
+
+        # Print remediated hosts
+        if vulnerable_count < len(results):
+            print(f"\n{Fore.GREEN}[+] Hosts with properly signed certificates:\n")
+            for target, is_self_signed, result in results:
+                if not is_self_signed:
+                    print(f"{Fore.GREEN}    {target} - REMEDIATED")
+                    print(f"      Subject: {result['subject']}")
+                    print(f"      Issuer: {result['issuer']}")
+    else:
+        # Print vulnerable hosts
+        if vulnerable_count > 0:
+            print(f"\n{Fore.YELLOW}[!] Hosts using self-signed certificates:\n")
+            for target, is_self_signed, result in results:
+                if is_self_signed:
+                    print(f"{Fore.RED}[✗] SELF-SIGNED - VULNERABLE: {target}")
+                    print(f"    Subject: {result['subject']}")
+                    print(f"    Issuer: {result['issuer']}")
+
+        # Print non-vulnerable hosts
+        if vulnerable_count < len(results):
+            print(f"\n{Fore.GREEN}[+] Hosts with properly signed certificates:\n")
+            for target, is_self_signed, result in results:
+                if not is_self_signed:
+                    print(f"{Fore.GREEN}[✓] NOT SELF-SIGNED: {target}")
+                    print(f"    Subject: {result['subject']}")
+                    print(f"    Issuer: {result['issuer']}")
+
+    # Print summary
+    print(f"\n{Fore.BLUE}[+] Self-Signed Certificate Scan Summary:")
+    print(f"Total targets: {len(results)}")
+    print(f"{Fore.RED}Self-signed certificates: {vulnerable_count}{Style.RESET_ALL}")
+    print(f"{Fore.GREEN}Properly signed certificates: {len(results) - vulnerable_count}{Style.RESET_ALL}")
+
 
 def print_signature_results(results, remediation_mode):
     """Print results for weak signature algorithm checks"""
@@ -458,12 +550,14 @@ Scan Types:
   --weak-signature Check for weak signature algorithms (MD5, SHA1)
   --tls10          Check for TLSv1.0 support
   --tls11          Check for TLSv1.1 support
+  --self-signed    Check for self-signed certificates
   --all            Run all scan types (default)
 
 Examples:
-  python ssl_scanner.py -i targets.txt --all
-  python ssl_scanner.py -i targets.txt --bar-mitzvah --sweet32 -t 10
-  python ssl_scanner.py -i targets.txt --tls10 --tls11 -r
+  python sslscan2.0.py -i targets.txt --all
+  python sslscan2.0.py -i targets.txt --bar-mitzvah --sweet32 -t 10
+  python sslscan2.0.py -i targets.txt --tls10 --tls11 -r
+  python sslscan2.0.py -i targets.txt --self-signed
 """
     )
 
@@ -479,6 +573,7 @@ Examples:
     scan_group.add_argument("--weak-signature", action="store_true", help="Check for weak signature algorithms (MD5, SHA1)")
     scan_group.add_argument("--tls10", action="store_true", help="Check for TLSv1.0 support")
     scan_group.add_argument("--tls11", action="store_true", help="Check for TLSv1.1 support")
+    scan_group.add_argument("--self-signed", action="store_true", help="Check for self-signed certificates")
     scan_group.add_argument("--all", action="store_true", help="Run all scan types (default)")
 
     args = parser.parse_args()
@@ -495,10 +590,12 @@ Examples:
         scan_types.append("tls10")
     if args.tls11 or args.all:
         scan_types.append("tls11")
+    if args.self_signed or args.all:  # Add this block
+        scan_types.append("self_signed")
 
     # If no scan types specified, run all
     if not scan_types:
-        scan_types = ["bar_mitzvah", "sweet32", "weak_signature", "tls10", "tls11"]
+        scan_types = ["bar_mitzvah", "sweet32", "weak_signature", "tls10", "tls11", "self_signed"]
 
     # Load targets
     targets = load_targets(args.input)
