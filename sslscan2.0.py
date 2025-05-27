@@ -7,6 +7,7 @@ import argparse
 import concurrent.futures
 import tempfile
 import threading
+import datetime
 from colorama import Fore, Style, init
 
 # Initialize colorama
@@ -153,7 +154,33 @@ def parse_sslscan_output(output):
 
             # Compare Subject and Issuer
             self_signed = (subject == issuer)
+    
+     # Extract certificate expiration date
+    expiration_match = re.search(r"Not valid after:\s+(.+?)$", output, re.MULTILINE)
+    expiration_date_str = expiration_match.group(1).strip() if expiration_match else None
 
+    expiration_date = None
+    is_expired = False
+    days_remaining = None
+
+    if expiration_date_str:
+        try:
+            # Try to parse the date (format: May 30 12:00:00 2025 GMT)
+            expiration_date = datetime.datetime.strptime(expiration_date_str, "%b %d %H:%M:%S %Y %Z")
+        except ValueError:
+            # Try alternative format if the first one fails
+            try:
+                expiration_date = datetime.datetime.strptime(expiration_date_str, "%b %d %H:%M:%S %Y")
+            except ValueError:
+                expiration_date = None
+
+        if expiration_date:
+            # Get current date
+            current_date = datetime.datetime.now()
+
+            # Compare dates
+            is_expired = expiration_date < current_date
+            days_remaining = (expiration_date - current_date).days if not is_expired else 0
 
     return {
         "all_ciphers": all_ciphers,
@@ -165,7 +192,11 @@ def parse_sslscan_output(output):
         "tls11_enabled": tls11_enabled,
         "self_signed": self_signed,
         "subject": subject,
-        "issuer": issuer
+        "issuer": issuer,
+        "expiration_date_str": expiration_date_str,
+        "expiration_date": expiration_date,
+        "is_expired": is_expired,
+        "days_remaining": days_remaining
     }
 
 def scan_target(ip, port, scan_types):
@@ -228,6 +259,12 @@ def scan_target(ip, port, scan_types):
             result["self_signed"] = parsed_data["self_signed"]
             result["subject"] = parsed_data["subject"]
             result["issuer"] = parsed_data["issuer"]
+            
+        # Check for expired certificate
+        if "expired_cert" in scan_types:
+            result["is_expired"] = parsed_data["is_expired"]
+            result["expiration_date_str"] = parsed_data["expiration_date_str"]
+            result["days_remaining"] = parsed_data["days_remaining"]
 
         return result
 
@@ -249,6 +286,7 @@ def print_scan_results(results, show_all_ciphers=False, remediation_mode=False):
     tls10_results = []
     tls11_results = []
     self_signed_results = []
+    expired_cert_results = []
 
     # Count statistics
     total_targets = len(results)
@@ -279,6 +317,9 @@ def print_scan_results(results, show_all_ciphers=False, remediation_mode=False):
         
         if "self_signed" in scan_types:  # Add this block
             self_signed_results.append((target, result.get("self_signed", False), result))
+            
+        if "expired_cert" in scan_types:
+            expired_cert_results.append((target, result.get("is_expired", False), result))
 
     # Print results for each scan type
     if bar_mitzvah_results:
@@ -298,6 +339,9 @@ def print_scan_results(results, show_all_ciphers=False, remediation_mode=False):
     
     if self_signed_results:  # Add this block
         print_self_signed_results(self_signed_results, remediation_mode)
+        
+    if expired_cert_results:
+        print_expired_cert_results(expired_cert_results, remediation_mode)
 
     # Print overall summary
     print(f"\n{Fore.BLUE}[+] Overall Scan Summary:{Style.RESET_ALL}")
@@ -538,6 +582,55 @@ def print_tls_results(tls_version, results, remediation_mode):
     print(f"Total targets: {len(results)}")
     print(f"{Fore.YELLOW}Hosts with {tls_version} enabled: {vulnerable_count}{Style.RESET_ALL}")
     print(f"{Fore.GREEN}Hosts with {tls_version} disabled: {len(results) - vulnerable_count}{Style.RESET_ALL}")
+    
+def print_expired_cert_results(results, remediation_mode):
+    """Print results for expired certificate checks"""
+    vulnerable_count = sum(1 for _, is_expired, _ in results if is_expired)
+
+    print(f"\n{Fore.BLUE}{'=' * 60}")
+    print(f"{Fore.BLUE}[+] SSL Certificate Expiration Scan Results:")
+    print(f"{Fore.BLUE}{'=' * 60}")
+
+    if remediation_mode:
+        print(f"\n{Fore.CYAN}[*] Remediation Test Results:\n")
+
+        # Print vulnerable hosts
+        if vulnerable_count > 0:
+            print(f"{Fore.YELLOW}[!] Hosts with expired certificates:\n")
+            for target, is_expired, result in results:
+                if is_expired:
+                    print(f"{Fore.YELLOW}    {target} - {Fore.RED}NOT REMEDIATED")
+                    print(f"      Expired on: {result['expiration_date_str']}")
+
+        # Print remediated hosts
+        if vulnerable_count < len(results):
+            print(f"\n{Fore.GREEN}[+] Hosts with valid certificates:\n")
+            for target, is_expired, result in results:
+                if not is_expired:
+                    print(f"{Fore.GREEN}    {target} - REMEDIATED")
+                    print(f"      Expires in: {result['days_remaining']} days ({result['expiration_date_str']})")
+    else:
+        # Print vulnerable hosts
+        if vulnerable_count > 0:
+            print(f"\n{Fore.YELLOW}[!] Hosts with expired certificates:\n")
+            for target, is_expired, result in results:
+                if is_expired:
+                    print(f"{Fore.RED}[✗] EXPIRED SSL CERTIFICATE - VULNERABLE: {target}")
+                    print(f"    Expired on: {result['expiration_date_str']}")
+
+        # Print non-vulnerable hosts
+        if vulnerable_count < len(results):
+            print(f"\n{Fore.GREEN}[+] Hosts with valid certificates:\n")
+            for target, is_expired, result in results:
+                if not is_expired:
+                    print(f"{Fore.GREEN}[✓] CURRENT SSL CERTIFICATE - NOT VULNERABLE: {target}")
+                    print(f"    Expires in: {result['days_remaining']} days ({result['expiration_date_str']})")
+
+    # Print summary
+    print(f"\n{Fore.BLUE}[+] SSL Certificate Expiration Scan Summary:")
+    print(f"Total targets: {len(results)}")
+    print(f"{Fore.RED}Expired certificates: {vulnerable_count}{Style.RESET_ALL}")
+    print(f"{Fore.GREEN}Valid certificates: {len(results) - vulnerable_count}{Style.RESET_ALL}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -551,6 +644,7 @@ Scan Types:
   --tls10          Check for TLSv1.0 support
   --tls11          Check for TLSv1.1 support
   --self-signed    Check for self-signed certificates
+  --expired-cert   Check for expired SSL certificat
   --all            Run all scan types (default)
 
 Examples:
@@ -558,6 +652,7 @@ Examples:
   python sslscan2.0.py -i targets.txt --bar-mitzvah --sweet32 -t 10
   python sslscan2.0.py -i targets.txt --tls10 --tls11 -r
   python sslscan2.0.py -i targets.txt --self-signed
+  python sslscan2.0.py -i targets.txt --expired-cert
 """
     )
 
@@ -575,6 +670,7 @@ Examples:
     scan_group.add_argument("--tls11", action="store_true", help="Check for TLSv1.1 support")
     scan_group.add_argument("--self-signed", action="store_true", help="Check for self-signed certificates")
     scan_group.add_argument("--all", action="store_true", help="Run all scan types (default)")
+    scan_group.add_argument("--expired-cert", action="store_true", help="Check for expired SSL certificates")
 
     args = parser.parse_args()
 
@@ -592,10 +688,12 @@ Examples:
         scan_types.append("tls11")
     if args.self_signed or args.all:  # Add this block
         scan_types.append("self_signed")
+    if args.expired_cert or args.all:
+        scan_types.append("expired_cert")
 
     # If no scan types specified, run all
     if not scan_types:
-        scan_types = ["bar_mitzvah", "sweet32", "weak_signature", "tls10", "tls11", "self_signed"]
+        scan_types = ["bar_mitzvah", "sweet32", "weak_signature", "tls10", "tls11", "self_signed", "expired_cert"]
 
     # Load targets
     targets = load_targets(args.input)
