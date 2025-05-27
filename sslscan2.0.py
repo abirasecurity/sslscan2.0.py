@@ -640,18 +640,59 @@ def print_expired_cert_results(results, remediation_mode):
 # New functions for file output
 
 def write_json_output(results, filename):
-    """Write scan results to a JSON file"""
-    # Convert datetime objects to strings for JSON serialization
-    serializable_results = []
-    for result in results:
-        serializable_result = result.copy()
-        if "expiration_date" in serializable_result:
-            if serializable_result["expiration_date"]:
-                serializable_result["expiration_date"] = serializable_result["expiration_date"].isoformat()
-        serializable_results.append(serializable_result)
+    """Write scan results to a well-structured JSON file"""
+    # Create a structured output format
+    structured_results = []
 
+    for result in results:
+        target = result.get("target", "unknown")
+
+        # Create a clean structure for each target
+        structured_result = {
+            "target": target,
+            "scan_date": datetime.now().isoformat(),
+            "vulnerabilities": {
+                "sweet32": {
+                    "name": "SWEET32 (3DES)",
+                    "vulnerable": result.get("sweet32_vulnerable", False),
+                    "details": result.get("sweet32_details", "")
+                },
+                "rc4": {
+                    "name": "Bar Mitzvah (RC4)",
+                    "vulnerable": result.get("rc4_vulnerable", False),
+                    "details": result.get("rc4_details", "")
+                },
+                "tlsv1": {
+                    "name": "TLSv1.0",
+                    "vulnerable": result.get("tlsv1_vulnerable", False),
+                    "details": result.get("tlsv1_details", "")
+                },
+                "tlsv1_1": {
+                    "name": "TLSv1.1",
+                    "vulnerable": result.get("tlsv1_1_vulnerable", False),
+                    "details": result.get("tlsv1_1_details", "")
+                },
+                "weak_signature": {
+                    "name": "Weak Signature Algorithm",
+                    "vulnerable": result.get("weak_signature_vulnerable", False),
+                    "details": result.get("weak_signature_details", "")
+                }
+            },
+            "certificate": {
+                "self_signed": result.get("self_signed", False),
+                "expired": result.get("expired", False),
+                "expiration_date": result.get("expiration_date", "").isoformat() if result.get("expiration_date") else None,
+                "subject": result.get("subject", ""),
+                "issuer": result.get("issuer", "")
+            },
+            "raw_data": result.get("raw_data", "")
+        }
+
+        structured_results.append(structured_result)
+
+    # Write to file with proper indentation for readability
     with open(filename, 'w') as f:
-        json.dump(serializable_results, f, indent=2)
+        json.dump(structured_results, f, indent=4)
 
     print(f"{Fore.GREEN}[+] Results written to JSON file: {filename}")
 
@@ -697,76 +738,148 @@ def write_csv_output(results, filename):
     print(f"{Fore.GREEN}[+] Results written to CSV file: {filename}")
 
 def write_xml_output(results, filename):
-    """Write scan results to an XML file"""
-    root = ET.Element("sslscan_results")
+    """Write scan results to a well-structured XML file"""
+    # Create root element
+    root = ET.Element("ssl_scan_results")
 
     for result in results:
+        target = result.get("target", "unknown")
+
+        # Create target element
         target_elem = ET.SubElement(root, "target")
-        target_elem.set("host", result["target"])
+        target_elem.set("host", target)
+        target_elem.set("scan_date", datetime.now().isoformat())
 
-        for key, value in result.items():
-            if key == "target":
-                continue
+        # Create vulnerabilities section
+        vulns_elem = ET.SubElement(target_elem, "vulnerabilities")
 
-            if isinstance(value, dict):
-                dict_elem = ET.SubElement(target_elem, key)
-                for sub_key, sub_value in value.items():
-                    sub_elem = ET.SubElement(dict_elem, sub_key)
-                    sub_elem.text = str(sub_value)
-            elif isinstance(value, list):
-                list_elem = ET.SubElement(target_elem, key)
-                for item in value:
-                    if isinstance(item, dict):
-                        item_elem = ET.SubElement(list_elem, "item")
-                        for item_key, item_value in item.items():
-                            item_sub_elem = ET.SubElement(item_elem, item_key)
-                            item_sub_elem.text = str(item_value)
-                    else:
-                        item_elem = ET.SubElement(list_elem, "item")
-                        item_elem.text = str(item)
-            elif key == "expiration_date" and value:
-                elem = ET.SubElement(target_elem, key)
-                elem.text = value.isoformat()
-            else:
-                elem = ET.SubElement(target_elem, key)
-                elem.text = str(value)
+        # Add SWEET32 vulnerability
+        sweet32 = ET.SubElement(vulns_elem, "vulnerability")
+        sweet32.set("type", "SWEET32 (3DES)")
+        sweet32.set("vulnerable", str(result.get("sweet32_vulnerable", False)).lower())
+        if result.get("sweet32_details"):
+            sweet32_details = ET.SubElement(sweet32, "details")
+            sweet32_details.text = result.get("sweet32_details")
 
-    # Pretty print XML
-    xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
+        # Add RC4 vulnerability
+        rc4 = ET.SubElement(vulns_elem, "vulnerability")
+        rc4.set("type", "Bar Mitzvah (RC4)")
+        rc4.set("vulnerable", str(result.get("rc4_vulnerable", False)).lower())
+        if result.get("rc4_details"):
+            rc4_details = ET.SubElement(rc4, "details")
+            rc4_details.text = result.get("rc4_details")
+
+        # Add TLSv1.0 vulnerability
+        tlsv1 = ET.SubElement(vulns_elem, "vulnerability")
+        tlsv1.set("type", "TLSv1.0")
+        tlsv1.set("vulnerable", str(result.get("tlsv1_vulnerable", False)).lower())
+        if result.get("tlsv1_details"):
+            tlsv1_details = ET.SubElement(tlsv1, "details")
+            tlsv1_details.text = result.get("tlsv1_details")
+
+        # Add TLSv1.1 vulnerability
+        tlsv1_1 = ET.SubElement(vulns_elem, "vulnerability")
+        tlsv1_1.set("type", "TLSv1.1")
+        tlsv1_1.set("vulnerable", str(result.get("tlsv1_1_vulnerable", False)).lower())
+        if result.get("tlsv1_1_details"):
+            tlsv1_1_details = ET.SubElement(tlsv1_1, "details")
+            tlsv1_1_details.text = result.get("tlsv1_1_details")
+
+        # Add weak signature vulnerability
+        weak_sig = ET.SubElement(vulns_elem, "vulnerability")
+        weak_sig.set("type", "Weak Signature Algorithm")
+        weak_sig.set("vulnerable", str(result.get("weak_signature_vulnerable", False)).lower())
+        if result.get("weak_signature_details"):
+            weak_sig_details = ET.SubElement(weak_sig, "details")
+            weak_sig_details.text = result.get("weak_signature_details")
+
+        # Add certificate information
+        cert_elem = ET.SubElement(target_elem, "certificate")
+        cert_elem.set("self_signed", str(result.get("self_signed", False)).lower())
+        cert_elem.set("expired", str(result.get("expired", False)).lower())
+
+        if result.get("expiration_date"):
+            exp_date = ET.SubElement(cert_elem, "expiration_date")
+            exp_date.text = result.get("expiration_date").isoformat()
+
+        if result.get("subject"):
+            subject = ET.SubElement(cert_elem, "subject")
+            subject.text = result.get("subject")
+
+        if result.get("issuer"):
+            issuer = ET.SubElement(cert_elem, "issuer")
+            issuer.text = result.get("issuer")
+
+    # Create XML tree and write to file with pretty formatting
+    tree = ET.ElementTree(root)
+
+    # Use minidom for pretty printing
+    xml_str = ET.tostring(root, encoding='utf-8')
+    dom = minidom.parseString(xml_str)
+    pretty_xml = dom.toprettyxml(indent="  ")
+
     with open(filename, 'w') as f:
-        f.write(xml_str)
+        f.write(pretty_xml)
 
     print(f"{Fore.GREEN}[+] Results written to XML file: {filename}")
 
-def write_yaml_output(results, filename):
-    """Write scan results to a YAML file"""
-    # Convert datetime objects to strings for YAML serialization
-    serializable_results = []
-    for result in results:
-        serializable_result = result.copy()
-        if "expiration_date" in serializable_result:
-            if serializable_result["expiration_date"]:
-                serializable_result["expiration_date"] = serializable_result["expiration_date"].isoformat()
-        serializable_results.append(serializable_result)
 
+def write_yaml_output(results, filename):
+    """Write scan results to a well-structured YAML file"""
+    # Create a structured output format
+    structured_results = []
+
+    for result in results:
+        target = result.get("target", "unknown")
+
+        # Create a clean structure for each target
+        structured_result = {
+            "target": target,
+            "scan_date": datetime.now(),
+            "vulnerabilities": {
+                "sweet32": {
+                    "name": "SWEET32 (3DES)",
+                    "vulnerable": result.get("sweet32_vulnerable", False),
+                    "details": result.get("sweet32_details", "")
+                },
+                "rc4": {
+                    "name": "Bar Mitzvah (RC4)",
+                    "vulnerable": result.get("rc4_vulnerable", False),
+                    "details": result.get("rc4_details", "")
+                },
+                "tlsv1": {
+                    "name": "TLSv1.0",
+                    "vulnerable": result.get("tlsv1_vulnerable", False),
+                    "details": result.get("tlsv1_details", "")
+                },
+                "tlsv1_1": {
+                    "name": "TLSv1.1",
+                    "vulnerable": result.get("tlsv1_1_vulnerable", False),
+                    "details": result.get("tlsv1_1_details", "")
+                },
+                "weak_signature": {
+                    "name": "Weak Signature Algorithm",
+                    "vulnerable": result.get("weak_signature_vulnerable", False),
+                    "details": result.get("weak_signature_details", "")
+                }
+            },
+            "certificate": {
+                "self_signed": result.get("self_signed", False),
+                "expired": result.get("expired", False),
+                "expiration_date": result.get("expiration_date"),
+                "subject": result.get("subject", ""),
+                "issuer": result.get("issuer", "")
+            },
+            "raw_data": result.get("raw_data", "")
+        }
+
+        structured_results.append(structured_result)
+
+    # Write to file with default_flow_style=False for better readability
     with open(filename, 'w') as f:
-        yaml.dump(serializable_results, f, default_flow_style=False)
+        yaml.dump(structured_results, f, default_flow_style=False, sort_keys=False)
 
     print(f"{Fore.GREEN}[+] Results written to YAML file: {filename}")
-
-def write_output_file(results, filename, format_type):
-    """Write scan results to a file in the specified format"""
-    if format_type == "json":
-        write_json_output(results, filename)
-    elif format_type == "csv":
-        write_csv_output(results, filename)
-    elif format_type == "xml":
-        write_xml_output(results, filename)
-    elif format_type == "yaml":
-        write_yaml_output(results, filename)
-    else:
-        print(f"{Fore.RED}[!] Unsupported output format: {format_type}")
-
 
 def main():
     parser = argparse.ArgumentParser(
