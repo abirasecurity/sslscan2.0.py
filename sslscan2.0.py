@@ -8,6 +8,11 @@ import concurrent.futures
 import tempfile
 import threading
 import datetime
+import json
+import csv
+import xml.etree.ElementTree as ET
+import xml.dom.minidom as minidom
+import yaml  # You may need to install PyYAML: pip install pyyaml
 from colorama import Fore, Style, init
 
 # Initialize colorama
@@ -631,6 +636,124 @@ def print_expired_cert_results(results, remediation_mode):
     print(f"Total targets: {len(results)}")
     print(f"{Fore.RED}Expired certificates: {vulnerable_count}{Style.RESET_ALL}")
     print(f"{Fore.GREEN}Valid certificates: {len(results) - vulnerable_count}{Style.RESET_ALL}")
+    
+# New functions for file output
+
+def write_json_output(results, filename):
+    """Write scan results to a JSON file"""
+    # Convert datetime objects to strings for JSON serialization
+    serializable_results = []
+    for result in results:
+        serializable_result = result.copy()
+        if "expiration_date" in serializable_result:
+            if serializable_result["expiration_date"]:
+                serializable_result["expiration_date"] = serializable_result["expiration_date"].isoformat()
+        serializable_results.append(serializable_result)
+
+    with open(filename, 'w') as f:
+        json.dump(serializable_results, f, indent=2)
+
+    print(f"{Fore.GREEN}[+] Results written to JSON file: {filename}")
+
+def write_csv_output(results, filename):
+    """Write scan results to a CSV file"""
+    # Determine all possible fields from all results
+    fieldnames = set()
+    for result in results:
+        for key in result.keys():
+            fieldnames.add(key)
+
+    fieldnames = sorted(list(fieldnames))
+
+    with open(filename, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for result in results:
+            # Convert complex data structures to strings for CSV
+            row = {}
+            for key, value in result.items():
+                if isinstance(value, dict) or isinstance(value, list):
+                    row[key] = str(value)
+                elif key == "expiration_date" and value:
+                    row[key] = value.isoformat()
+                else:
+                    row[key] = value
+            writer.writerow(row)
+
+    print(f"{Fore.GREEN}[+] Results written to CSV file: {filename}")
+
+def write_xml_output(results, filename):
+    """Write scan results to an XML file"""
+    root = ET.Element("sslscan_results")
+
+    for result in results:
+        target_elem = ET.SubElement(root, "target")
+        target_elem.set("host", result["target"])
+
+        for key, value in result.items():
+            if key == "target":
+                continue
+
+            if isinstance(value, dict):
+                dict_elem = ET.SubElement(target_elem, key)
+                for sub_key, sub_value in value.items():
+                    sub_elem = ET.SubElement(dict_elem, sub_key)
+                    sub_elem.text = str(sub_value)
+            elif isinstance(value, list):
+                list_elem = ET.SubElement(target_elem, key)
+                for item in value:
+                    if isinstance(item, dict):
+                        item_elem = ET.SubElement(list_elem, "item")
+                        for item_key, item_value in item.items():
+                            item_sub_elem = ET.SubElement(item_elem, item_key)
+                            item_sub_elem.text = str(item_value)
+                    else:
+                        item_elem = ET.SubElement(list_elem, "item")
+                        item_elem.text = str(item)
+            elif key == "expiration_date" and value:
+                elem = ET.SubElement(target_elem, key)
+                elem.text = value.isoformat()
+            else:
+                elem = ET.SubElement(target_elem, key)
+                elem.text = str(value)
+
+    # Pretty print XML
+    xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
+    with open(filename, 'w') as f:
+        f.write(xml_str)
+
+    print(f"{Fore.GREEN}[+] Results written to XML file: {filename}")
+
+def write_yaml_output(results, filename):
+    """Write scan results to a YAML file"""
+    # Convert datetime objects to strings for YAML serialization
+    serializable_results = []
+    for result in results:
+        serializable_result = result.copy()
+        if "expiration_date" in serializable_result:
+            if serializable_result["expiration_date"]:
+                serializable_result["expiration_date"] = serializable_result["expiration_date"].isoformat()
+        serializable_results.append(serializable_result)
+
+    with open(filename, 'w') as f:
+        yaml.dump(serializable_results, f, default_flow_style=False)
+
+    print(f"{Fore.GREEN}[+] Results written to YAML file: {filename}")
+
+def write_output_file(results, filename, format_type):
+    """Write scan results to a file in the specified format"""
+    if format_type == "json":
+        write_json_output(results, filename)
+    elif format_type == "csv":
+        write_csv_output(results, filename)
+    elif format_type == "xml":
+        write_xml_output(results, filename)
+    elif format_type == "yaml":
+        write_yaml_output(results, filename)
+    else:
+        print(f"{Fore.RED}[!] Unsupported output format: {format_type}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -644,8 +767,13 @@ Scan Types:
   --tls10          Check for TLSv1.0 support
   --tls11          Check for TLSv1.1 support
   --self-signed    Check for self-signed certificates
-  --expired-cert   Check for expired SSL certificat
+  --expired-cert   Check for expired SSL certificates
   --all            Run all scan types (default)
+
+Output Options:
+  -o, --output     Specify output file path
+  --format         Output format (json, csv, xml, yaml)
+  --no-console     Suppress console output and only write to file
 
 Examples:
   python sslscan2.0.py -i targets.txt --all
@@ -653,6 +781,9 @@ Examples:
   python sslscan2.0.py -i targets.txt --tls10 --tls11 -r
   python sslscan2.0.py -i targets.txt --self-signed
   python sslscan2.0.py -i targets.txt --expired-cert
+  python sslscan2.0.py -i targets.txt --all -o results.json
+  python sslscan2.0.py -i targets.txt --all -o results.csv --format csv
+  python sslscan2.0.py -i targets.txt --all -o results.xml --format xml --no-console
 """
     )
 
@@ -671,7 +802,14 @@ Examples:
     scan_group.add_argument("--self-signed", action="store_true", help="Check for self-signed certificates")
     scan_group.add_argument("--all", action="store_true", help="Run all scan types (default)")
     scan_group.add_argument("--expired-cert", action="store_true", help="Check for expired SSL certificates")
-
+    
+    # Add output options group here
+    output_group = parser.add_argument_group("output options")
+    output_group.add_argument("-o", "--output", help="Output file path")
+    output_group.add_argument("--format", choices=["json", "csv", "xml", "yaml"], default="json", 
+                             help="Output format (default: json)")
+    output_group.add_argument("--no-console", action="store_true", 
+                             help="Suppress console output and only write to file")
     args = parser.parse_args()
 
     # Determine which scan types to run
@@ -723,6 +861,14 @@ Examples:
 
     # Print results
     print_scan_results(results, args.show_all_ciphers, args.remediation)
+    
+    # Print results to console if not suppressed
+    if not args.no_console:
+        print_scan_results(results, args.show_all_ciphers, args.remediation)
+        
+    # Write results to file if output file specified
+    if args.output:
+        write_output_file(results, args.output, args.format)
 
 if __name__ == "__main__":
     main()
