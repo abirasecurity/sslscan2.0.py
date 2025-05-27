@@ -640,59 +640,18 @@ def print_expired_cert_results(results, remediation_mode):
 # New functions for file output
 
 def write_json_output(results, filename):
-    """Write scan results to a well-structured JSON file"""
-    # Create a structured output format
-    structured_results = []
-
+    """Write scan results to a JSON file"""
+    # Convert datetime objects to strings for JSON serialization
+    serializable_results = []
     for result in results:
-        target = result.get("target", "unknown")
+        serializable_result = result.copy()
+        if "expiration_date" in serializable_result:
+            if serializable_result["expiration_date"]:
+                serializable_result["expiration_date"] = serializable_result["expiration_date"].isoformat()
+        serializable_results.append(serializable_result)
 
-        # Create a clean structure for each target
-        structured_result = {
-            "target": target,
-            "scan_date": datetime.now().isoformat(),
-            "vulnerabilities": {
-                "sweet32": {
-                    "name": "SWEET32 (3DES)",
-                    "vulnerable": result.get("sweet32_vulnerable", False),
-                    "details": result.get("sweet32_details", "")
-                },
-                "rc4": {
-                    "name": "Bar Mitzvah (RC4)",
-                    "vulnerable": result.get("rc4_vulnerable", False),
-                    "details": result.get("rc4_details", "")
-                },
-                "tlsv1": {
-                    "name": "TLSv1.0",
-                    "vulnerable": result.get("tlsv1_vulnerable", False),
-                    "details": result.get("tlsv1_details", "")
-                },
-                "tlsv1_1": {
-                    "name": "TLSv1.1",
-                    "vulnerable": result.get("tlsv1_1_vulnerable", False),
-                    "details": result.get("tlsv1_1_details", "")
-                },
-                "weak_signature": {
-                    "name": "Weak Signature Algorithm",
-                    "vulnerable": result.get("weak_signature_vulnerable", False),
-                    "details": result.get("weak_signature_details", "")
-                }
-            },
-            "certificate": {
-                "self_signed": result.get("self_signed", False),
-                "expired": result.get("expired", False),
-                "expiration_date": result.get("expiration_date", "").isoformat() if result.get("expiration_date") else None,
-                "subject": result.get("subject", ""),
-                "issuer": result.get("issuer", "")
-            },
-            "raw_data": result.get("raw_data", "")
-        }
-
-        structured_results.append(structured_result)
-
-    # Write to file with proper indentation for readability
     with open(filename, 'w') as f:
-        json.dump(structured_results, f, indent=4)
+        json.dump(serializable_results, f, indent=2)
 
     print(f"{Fore.GREEN}[+] Results written to JSON file: {filename}")
 
@@ -738,153 +697,79 @@ def write_csv_output(results, filename):
     print(f"{Fore.GREEN}[+] Results written to CSV file: {filename}")
 
 def write_xml_output(results, filename):
-    """Write scan results to a well-structured XML file"""
-    # Create root element
-    root = ET.Element("ssl_scan_results")
+    """Write scan results to an XML file"""
+    root = ET.Element("sslscan_results")
 
     for result in results:
-        target = result.get("target", "unknown")
-
-        # Create target element
         target_elem = ET.SubElement(root, "target")
-        target_elem.set("host", target)
-        target_elem.set("scan_date", datetime.now().isoformat())
+        target_elem.set("host", result["target"])
 
-        # Create vulnerabilities section
-        vulns_elem = ET.SubElement(target_elem, "vulnerabilities")
+        for key, value in result.items():
+            if key == "target":
+                continue
 
-        # Add SWEET32 vulnerability
-        sweet32 = ET.SubElement(vulns_elem, "vulnerability")
-        sweet32.set("type", "SWEET32 (3DES)")
-        sweet32.set("vulnerable", str(result.get("sweet32_vulnerable", False)).lower())
-        if result.get("sweet32_details"):
-            sweet32_details = ET.SubElement(sweet32, "details")
-            sweet32_details.text = result.get("sweet32_details")
+            if isinstance(value, dict):
+                dict_elem = ET.SubElement(target_elem, key)
+                for sub_key, sub_value in value.items():
+                    sub_elem = ET.SubElement(dict_elem, sub_key)
+                    sub_elem.text = str(sub_value)
+            elif isinstance(value, list):
+                list_elem = ET.SubElement(target_elem, key)
+                for item in value:
+                    if isinstance(item, dict):
+                        item_elem = ET.SubElement(list_elem, "item")
+                        for item_key, item_value in item.items():
+                            item_sub_elem = ET.SubElement(item_elem, item_key)
+                            item_sub_elem.text = str(item_value)
+                    else:
+                        item_elem = ET.SubElement(list_elem, "item")
+                        item_elem.text = str(item)
+            elif key == "expiration_date" and value:
+                elem = ET.SubElement(target_elem, key)
+                elem.text = value.isoformat()
+            else:
+                elem = ET.SubElement(target_elem, key)
+                elem.text = str(value)
 
-        # Add RC4 vulnerability
-        rc4 = ET.SubElement(vulns_elem, "vulnerability")
-        rc4.set("type", "Bar Mitzvah (RC4)")
-        rc4.set("vulnerable", str(result.get("rc4_vulnerable", False)).lower())
-        if result.get("rc4_details"):
-            rc4_details = ET.SubElement(rc4, "details")
-            rc4_details.text = result.get("rc4_details")
-
-        # Add TLSv1.0 vulnerability
-        tlsv1 = ET.SubElement(vulns_elem, "vulnerability")
-        tlsv1.set("type", "TLSv1.0")
-        tlsv1.set("vulnerable", str(result.get("tlsv1_vulnerable", False)).lower())
-        if result.get("tlsv1_details"):
-            tlsv1_details = ET.SubElement(tlsv1, "details")
-            tlsv1_details.text = result.get("tlsv1_details")
-
-        # Add TLSv1.1 vulnerability
-        tlsv1_1 = ET.SubElement(vulns_elem, "vulnerability")
-        tlsv1_1.set("type", "TLSv1.1")
-        tlsv1_1.set("vulnerable", str(result.get("tlsv1_1_vulnerable", False)).lower())
-        if result.get("tlsv1_1_details"):
-            tlsv1_1_details = ET.SubElement(tlsv1_1, "details")
-            tlsv1_1_details.text = result.get("tlsv1_1_details")
-
-        # Add weak signature vulnerability
-        weak_sig = ET.SubElement(vulns_elem, "vulnerability")
-        weak_sig.set("type", "Weak Signature Algorithm")
-        weak_sig.set("vulnerable", str(result.get("weak_signature_vulnerable", False)).lower())
-        if result.get("weak_signature_details"):
-            weak_sig_details = ET.SubElement(weak_sig, "details")
-            weak_sig_details.text = result.get("weak_signature_details")
-
-        # Add certificate information
-        cert_elem = ET.SubElement(target_elem, "certificate")
-        cert_elem.set("self_signed", str(result.get("self_signed", False)).lower())
-        cert_elem.set("expired", str(result.get("expired", False)).lower())
-
-        if result.get("expiration_date"):
-            exp_date = ET.SubElement(cert_elem, "expiration_date")
-            exp_date.text = result.get("expiration_date").isoformat()
-
-        if result.get("subject"):
-            subject = ET.SubElement(cert_elem, "subject")
-            subject.text = result.get("subject")
-
-        if result.get("issuer"):
-            issuer = ET.SubElement(cert_elem, "issuer")
-            issuer.text = result.get("issuer")
-
-    # Create XML tree and write to file with pretty formatting
-    tree = ET.ElementTree(root)
-
-    # Use minidom for pretty printing
-    xml_str = ET.tostring(root, encoding='utf-8')
-    dom = minidom.parseString(xml_str)
-    pretty_xml = dom.toprettyxml(indent="  ")
-
+    # Pretty print XML
+    xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
     with open(filename, 'w') as f:
-        f.write(pretty_xml)
+        f.write(xml_str)
 
     print(f"{Fore.GREEN}[+] Results written to XML file: {filename}")
 
-
 def write_yaml_output(results, filename):
-    """Write scan results to a well-structured YAML file"""
-    # Create a structured output format
-    structured_results = []
-
+    """Write scan results to a YAML file"""
+    # Convert datetime objects to strings for YAML serialization
+    serializable_results = []
     for result in results:
-        target = result.get("target", "unknown")
+        serializable_result = result.copy()
+        if "expiration_date" in serializable_result:
+            if serializable_result["expiration_date"]:
+                serializable_result["expiration_date"] = serializable_result["expiration_date"].isoformat()
+        serializable_results.append(serializable_result)
 
-        # Create a clean structure for each target
-        structured_result = {
-            "target": target,
-            "scan_date": datetime.now(),
-            "vulnerabilities": {
-                "sweet32": {
-                    "name": "SWEET32 (3DES)",
-                    "vulnerable": result.get("sweet32_vulnerable", False),
-                    "details": result.get("sweet32_details", "")
-                },
-                "rc4": {
-                    "name": "Bar Mitzvah (RC4)",
-                    "vulnerable": result.get("rc4_vulnerable", False),
-                    "details": result.get("rc4_details", "")
-                },
-                "tlsv1": {
-                    "name": "TLSv1.0",
-                    "vulnerable": result.get("tlsv1_vulnerable", False),
-                    "details": result.get("tlsv1_details", "")
-                },
-                "tlsv1_1": {
-                    "name": "TLSv1.1",
-                    "vulnerable": result.get("tlsv1_1_vulnerable", False),
-                    "details": result.get("tlsv1_1_details", "")
-                },
-                "weak_signature": {
-                    "name": "Weak Signature Algorithm",
-                    "vulnerable": result.get("weak_signature_vulnerable", False),
-                    "details": result.get("weak_signature_details", "")
-                }
-            },
-            "certificate": {
-                "self_signed": result.get("self_signed", False),
-                "expired": result.get("expired", False),
-                "expiration_date": result.get("expiration_date"),
-                "subject": result.get("subject", ""),
-                "issuer": result.get("issuer", "")
-            },
-            "raw_data": result.get("raw_data", "")
-        }
-
-        structured_results.append(structured_result)
-
-    # Write to file with default_flow_style=False for better readability
     with open(filename, 'w') as f:
-        yaml.dump(structured_results, f, default_flow_style=False, sort_keys=False)
+        yaml.dump(serializable_results, f, default_flow_style=False)
 
     print(f"{Fore.GREEN}[+] Results written to YAML file: {filename}")
 
+def write_output_file(results, filename, format_type):
+    """Write scan results to a file in the specified format"""
+    if format_type == "json":
+        write_json_output(results, filename)
+    elif format_type == "csv":
+        write_csv_output(results, filename)
+    elif format_type == "xml":
+        write_xml_output(results, filename)
+    elif format_type == "yaml":
+        write_yaml_output(results, filename)
+    else:
+        print(f"{Fore.RED}[!] Unsupported output format: {format_type}")
+
+
 def main():
-    # Initialize argument parser with add_help=False to disable automatic help
     parser = argparse.ArgumentParser(
-        add_help=False,
         description="SSL/TLS Vulnerability Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -924,93 +809,99 @@ Examples:
 """
     )
 
-    # Add help option manually
-    parser.add_argument('-h', '--help', action='store_true', help='show this help message and exit')
+    # Create a mutually exclusive group for input sources
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("-i", "--input", help="Input file with IP:PORT targets, one per line")
+    input_group.add_argument("-s", "--single", help="Single target in IP:PORT format")
 
-    # Input options
-    parser.add_argument('-i', '--input', help='Input file with IP:PORT targets, one per line')
-    parser.add_argument('-s', '--single', help='Single target in IP:PORT format')
-    parser.add_argument('-t', '--threads', type=int, default=5, help='Number of concurrent threads (default: 5)')
+    parser.add_argument("-t", "--threads", type=int, default=5, help="Number of concurrent threads (default: 5)")
+    parser.add_argument("-r", "--remediation", action="store_true", help="Run in remediation test mode")
+    parser.add_argument("--show-all-ciphers", action="store_true", help="Show all supported cipher suites, not just vulnerable ones")
 
-    # Scan types
-    parser.add_argument('--bar-mitzvah', action='store_true', help='Check for Bar Mitzvah vulnerability (RC4 ciphers)')
-    parser.add_argument('--sweet32', action='store_true', help='Check for SWEET32 vulnerability (3DES ciphers)')
-    parser.add_argument('--weak-signature', action='store_true', help='Check for weak signature algorithms (MD5, SHA1)')
-    parser.add_argument('--tls10', action='store_true', help='Check for TLSv1.0 support')
-    parser.add_argument('--tls11', action='store_true', help='Check for TLSv1.1 support')
-    parser.add_argument('--self-signed', action='store_true', help='Check for self-signed certificates')
-    parser.add_argument('--expired-cert', action='store_true', help='Check for expired SSL certificates')
-    parser.add_argument('--all', action='store_true', help='Run all scan types (default)')
+    # Scan type options
+    scan_group = parser.add_argument_group("scan types")
+    scan_group.add_argument("--bar-mitzvah", action="store_true", help="Check for Bar Mitzvah vulnerability (RC4 ciphers)")
+    scan_group.add_argument("--sweet32", action="store_true", help="Check for SWEET32 vulnerability (3DES ciphers)")
+    scan_group.add_argument("--weak-signature", action="store_true", help="Check for weak signature algorithms (MD5, SHA1)")
+    scan_group.add_argument("--tls10", action="store_true", help="Check for TLSv1.0 support")
+    scan_group.add_argument("--tls11", action="store_true", help="Check for TLSv1.1 support")
+    scan_group.add_argument("--self-signed", action="store_true", help="Check for self-signed certificates")
+    scan_group.add_argument("--all", action="store_true", help="Run all scan types (default)")
+    scan_group.add_argument("--expired-cert", action="store_true", help="Check for expired SSL certificates")
 
-    # Output options
-    parser.add_argument('-o', '--output', help='Output file path')
-    parser.add_argument('--format', choices=['json', 'csv', 'xml', 'yaml'], default='json', help='Output format (default: json)')
-    parser.add_argument('--no-console', action='store_true', help='Suppress console output and only write to file')
-
-    # Parse arguments
+    # Add output options group here
+    output_group = parser.add_argument_group("output options")
+    output_group.add_argument("-o", "--output", help="Output file path")
+    output_group.add_argument("--format", choices=["json", "csv", "xml", "yaml"], default="json", 
+                             help="Output format (default: json)")
+    output_group.add_argument("--no-console", action="store_true", 
+                             help="Suppress console output and only write to file")
     args = parser.parse_args()
 
-    # Check if help was requested and display it
-    if args.help:
-        parser.print_help()
-        sys.exit(0)
-
-    # Validate input parameters
-    if not args.input and not args.single:
-        print("Error: You must specify either an input file (-i) or a single target (-s)")
-        parser.print_help()
-        sys.exit(1)
-
-    # Set default scan type to all if none specified
+    # Determine which scan types to run
     scan_types = []
-    if args.bar_mitzvah:
+    if args.bar_mitzvah or args.all:
         scan_types.append("bar_mitzvah")
-    if args.sweet32:
+    if args.sweet32 or args.all:
         scan_types.append("sweet32")
-    if args.weak_signature:
+    if args.weak_signature or args.all:
         scan_types.append("weak_signature")
-    if args.tls10:
+    if args.tls10 or args.all:
         scan_types.append("tls10")
-    if args.tls11:
+    if args.tls11 or args.all:
         scan_types.append("tls11")
-    if args.self_signed:
+    if args.self_signed or args.all:
         scan_types.append("self_signed")
-    if args.expired_cert:
+    if args.expired_cert or args.all:
         scan_types.append("expired_cert")
 
-    # If no specific scan types or --all is specified, run all scan types
-    if not scan_types or args.all:
+    # If no scan types specified, run all
+    if not scan_types:
         scan_types = ["bar_mitzvah", "sweet32", "weak_signature", "tls10", "tls11", "self_signed", "expired_cert"]
 
-    # Get targets
+    # Load targets
     targets = []
     if args.input:
-        try:
-            with open(args.input, 'r') as f:
-                targets = [line.strip() for line in f if line.strip()]
-        except Exception as e:
-            print(f"Error reading input file: {e}")
-            sys.exit(1)
+        targets = load_targets(args.input)
+        if not targets:
+            print(f"{Fore.YELLOW}Warning: No targets found in input file{Style.RESET_ALL}")
+            return
+        print(f"{Fore.BLUE}[+] Loaded {len(targets)} targets from {args.input}")
     elif args.single:
-        targets = [args.single]
+        # Parse the single target
+        parsed = parse_target_line(args.single)
+        if parsed:
+            targets = [parsed]
+            print(f"{Fore.BLUE}[+] Using target: {args.single}")
+        else:
+            print(f"{Fore.RED}Error: Invalid target format. Use IP:PORT format (e.g., 192.168.1.1:443){Style.RESET_ALL}")
+            return
 
-    # Validate targets format (IP:PORT)
-    for target in targets:
-        if ":" not in target:
-            print(f"Error: Target '{target}' is not in the correct format. Use IP:PORT format.")
-            sys.exit(1)
+    with print_lock:
+        print(f"{Fore.BLUE}[+] Running scan types: {', '.join(scan_types).replace('_', ' ')}")
+        print(f"{Fore.BLUE}[+] Using {args.threads} concurrent threads")
+        if args.remediation:
+            print(f"{Fore.BLUE}[+] Running in remediation test mode")
+        print()
 
-    # Run the scanner
-    results = run_scans(targets, scan_types, args.threads)
+    # Run scans in parallel
+    results = []
 
-    # Output results
-    if args.output:
-        output_results(results, args.output, args.format)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.threads) as executor:
+        future_to_target = {executor.submit(scan_target, ip, port, scan_types): (ip, port) for ip, port in targets}
 
+        for future in concurrent.futures.as_completed(future_to_target):
+            result = future.result()
+            if result:
+                results.append(result)
+
+    # Print results to console if not suppressed
     if not args.no_console:
-        print_results(results)
+        print_scan_results(results, args.show_all_ciphers, args.remediation)
 
-    print(f"Scan completed. {len(targets)} targets scanned.")
+    # Write results to file if output file specified
+    if args.output:
+        write_output_file(results, args.output, args.format)
 
 if __name__ == "__main__":
     main()
