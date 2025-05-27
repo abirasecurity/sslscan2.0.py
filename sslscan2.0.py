@@ -760,6 +760,11 @@ def main():
         description="SSL/TLS Vulnerability Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Input Options:
+  -i, --input      Input file with IP:PORT targets, one per line
+  -s, --single     Single target in IP:PORT format
+  -t, --threads    Number of concurrent threads (default: 5)
+
 Scan Types:
   --bar-mitzvah    Check for Bar Mitzvah vulnerability (RC4 ciphers)
   --sweet32        Check for SWEET32 vulnerability (3DES ciphers)
@@ -776,18 +781,26 @@ Output Options:
   --no-console     Suppress console output and only write to file
 
 Examples:
+  # Scan multiple targets from a file
   python sslscan2.0.py -i targets.txt --all
   python sslscan2.0.py -i targets.txt --bar-mitzvah --sweet32 -t 10
-  python sslscan2.0.py -i targets.txt --tls10 --tls11 -r
-  python sslscan2.0.py -i targets.txt --self-signed
-  python sslscan2.0.py -i targets.txt --expired-cert
+
+  # Scan a single target directly
+  python sslscan2.0.py -s 192.168.1.1:443 --all
+  python sslscan2.0.py -s 192.168.1.1:443 --tls10 --tls11 -t 8
+
+  # Output options
   python sslscan2.0.py -i targets.txt --all -o results.json
-  python sslscan2.0.py -i targets.txt --all -o results.csv --format csv
+  python sslscan2.0.py -s 192.168.1.1:443 --all -o results.csv --format csv
   python sslscan2.0.py -i targets.txt --all -o results.xml --format xml --no-console
 """
     )
 
-    parser.add_argument("-i", "--input", required=True, help="Input file with IP:PORT targets, one per line")
+    # Create a mutually exclusive group for input sources
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("-i", "--input", help="Input file with IP:PORT targets, one per line")
+    input_group.add_argument("-s", "--single", help="Single target in IP:PORT format")
+
     parser.add_argument("-t", "--threads", type=int, default=5, help="Number of concurrent threads (default: 5)")
     parser.add_argument("-r", "--remediation", action="store_true", help="Run in remediation test mode")
     parser.add_argument("--show-all-ciphers", action="store_true", help="Show all supported cipher suites, not just vulnerable ones")
@@ -802,7 +815,7 @@ Examples:
     scan_group.add_argument("--self-signed", action="store_true", help="Check for self-signed certificates")
     scan_group.add_argument("--all", action="store_true", help="Run all scan types (default)")
     scan_group.add_argument("--expired-cert", action="store_true", help="Check for expired SSL certificates")
-    
+
     # Add output options group here
     output_group = parser.add_argument_group("output options")
     output_group.add_argument("-o", "--output", help="Output file path")
@@ -824,7 +837,7 @@ Examples:
         scan_types.append("tls10")
     if args.tls11 or args.all:
         scan_types.append("tls11")
-    if args.self_signed or args.all:  # Add this block
+    if args.self_signed or args.all:
         scan_types.append("self_signed")
     if args.expired_cert or args.all:
         scan_types.append("expired_cert")
@@ -834,14 +847,24 @@ Examples:
         scan_types = ["bar_mitzvah", "sweet32", "weak_signature", "tls10", "tls11", "self_signed", "expired_cert"]
 
     # Load targets
-    targets = load_targets(args.input)
-
-    if not targets:
-        print(f"{Fore.YELLOW}Warning: No targets found in input file{Style.RESET_ALL}")
-        return
+    targets = []
+    if args.input:
+        targets = load_targets(args.input)
+        if not targets:
+            print(f"{Fore.YELLOW}Warning: No targets found in input file{Style.RESET_ALL}")
+            return
+        print(f"{Fore.BLUE}[+] Loaded {len(targets)} targets from {args.input}")
+    elif args.single:
+        # Parse the single target
+        parsed = parse_target_line(args.single)
+        if parsed:
+            targets = [parsed]
+            print(f"{Fore.BLUE}[+] Using target: {args.single}")
+        else:
+            print(f"{Fore.RED}Error: Invalid target format. Use IP:PORT format (e.g., 192.168.1.1:443){Style.RESET_ALL}")
+            return
 
     with print_lock:
-        print(f"{Fore.BLUE}[+] Loaded {len(targets)} targets from {args.input}")
         print(f"{Fore.BLUE}[+] Running scan types: {', '.join(scan_types).replace('_', ' ')}")
         print(f"{Fore.BLUE}[+] Using {args.threads} concurrent threads")
         if args.remediation:
@@ -859,13 +882,10 @@ Examples:
             if result:
                 results.append(result)
 
-    # Print results
-    print_scan_results(results, args.show_all_ciphers, args.remediation)
-    
     # Print results to console if not suppressed
     if not args.no_console:
         print_scan_results(results, args.show_all_ciphers, args.remediation)
-        
+
     # Write results to file if output file specified
     if args.output:
         write_output_file(results, args.output, args.format)
