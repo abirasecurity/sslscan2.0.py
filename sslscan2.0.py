@@ -882,9 +882,7 @@ def write_yaml_output(results, filename):
     print(f"{Fore.GREEN}[+] Results written to YAML file: {filename}")
 
 def main():
-    # Initialize argument parser with add_help=False to disable automatic help
     parser = argparse.ArgumentParser(
-        add_help=False,
         description="SSL/TLS Vulnerability Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -924,93 +922,99 @@ Examples:
 """
     )
 
-    # Add help option manually
-    parser.add_argument('-h', '--help', action='store_true', help='show this help message and exit')
+    # Create a mutually exclusive group for input sources
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("-i", "--input", help="Input file with IP:PORT targets, one per line")
+    input_group.add_argument("-s", "--single", help="Single target in IP:PORT format")
 
-    # Input options
-    parser.add_argument('-i', '--input', help='Input file with IP:PORT targets, one per line')
-    parser.add_argument('-s', '--single', help='Single target in IP:PORT format')
-    parser.add_argument('-t', '--threads', type=int, default=5, help='Number of concurrent threads (default: 5)')
+    parser.add_argument("-t", "--threads", type=int, default=5, help="Number of concurrent threads (default: 5)")
+    parser.add_argument("-r", "--remediation", action="store_true", help="Run in remediation test mode")
+    parser.add_argument("--show-all-ciphers", action="store_true", help="Show all supported cipher suites, not just vulnerable ones")
 
-    # Scan types
-    parser.add_argument('--bar-mitzvah', action='store_true', help='Check for Bar Mitzvah vulnerability (RC4 ciphers)')
-    parser.add_argument('--sweet32', action='store_true', help='Check for SWEET32 vulnerability (3DES ciphers)')
-    parser.add_argument('--weak-signature', action='store_true', help='Check for weak signature algorithms (MD5, SHA1)')
-    parser.add_argument('--tls10', action='store_true', help='Check for TLSv1.0 support')
-    parser.add_argument('--tls11', action='store_true', help='Check for TLSv1.1 support')
-    parser.add_argument('--self-signed', action='store_true', help='Check for self-signed certificates')
-    parser.add_argument('--expired-cert', action='store_true', help='Check for expired SSL certificates')
-    parser.add_argument('--all', action='store_true', help='Run all scan types (default)')
+    # Scan type options
+    scan_group = parser.add_argument_group("scan types")
+    scan_group.add_argument("--bar-mitzvah", action="store_true", help="Check for Bar Mitzvah vulnerability (RC4 ciphers)")
+    scan_group.add_argument("--sweet32", action="store_true", help="Check for SWEET32 vulnerability (3DES ciphers)")
+    scan_group.add_argument("--weak-signature", action="store_true", help="Check for weak signature algorithms (MD5, SHA1)")
+    scan_group.add_argument("--tls10", action="store_true", help="Check for TLSv1.0 support")
+    scan_group.add_argument("--tls11", action="store_true", help="Check for TLSv1.1 support")
+    scan_group.add_argument("--self-signed", action="store_true", help="Check for self-signed certificates")
+    scan_group.add_argument("--all", action="store_true", help="Run all scan types (default)")
+    scan_group.add_argument("--expired-cert", action="store_true", help="Check for expired SSL certificates")
 
-    # Output options
-    parser.add_argument('-o', '--output', help='Output file path')
-    parser.add_argument('--format', choices=['json', 'csv', 'xml', 'yaml'], default='json', help='Output format (default: json)')
-    parser.add_argument('--no-console', action='store_true', help='Suppress console output and only write to file')
-
-    # Parse arguments
+    # Add output options group here
+    output_group = parser.add_argument_group("output options")
+    output_group.add_argument("-o", "--output", help="Output file path")
+    output_group.add_argument("--format", choices=["json", "csv", "xml", "yaml"], default="json", 
+                             help="Output format (default: json)")
+    output_group.add_argument("--no-console", action="store_true", 
+                             help="Suppress console output and only write to file")
     args = parser.parse_args()
 
-    # Check if help was requested and display it
-    if args.help:
-        parser.print_help()
-        sys.exit(0)
-
-    # Validate input parameters
-    if not args.input and not args.single:
-        print("Error: You must specify either an input file (-i) or a single target (-s)")
-        parser.print_help()
-        sys.exit(1)
-
-    # Set default scan type to all if none specified
+    # Determine which scan types to run
     scan_types = []
-    if args.bar_mitzvah:
+    if args.bar_mitzvah or args.all:
         scan_types.append("bar_mitzvah")
-    if args.sweet32:
+    if args.sweet32 or args.all:
         scan_types.append("sweet32")
-    if args.weak_signature:
+    if args.weak_signature or args.all:
         scan_types.append("weak_signature")
-    if args.tls10:
+    if args.tls10 or args.all:
         scan_types.append("tls10")
-    if args.tls11:
+    if args.tls11 or args.all:
         scan_types.append("tls11")
-    if args.self_signed:
+    if args.self_signed or args.all:
         scan_types.append("self_signed")
-    if args.expired_cert:
+    if args.expired_cert or args.all:
         scan_types.append("expired_cert")
 
-    # If no specific scan types or --all is specified, run all scan types
-    if not scan_types or args.all:
+    # If no scan types specified, run all
+    if not scan_types:
         scan_types = ["bar_mitzvah", "sweet32", "weak_signature", "tls10", "tls11", "self_signed", "expired_cert"]
 
-    # Get targets
+    # Load targets
     targets = []
     if args.input:
-        try:
-            with open(args.input, 'r') as f:
-                targets = [line.strip() for line in f if line.strip()]
-        except Exception as e:
-            print(f"Error reading input file: {e}")
-            sys.exit(1)
+        targets = load_targets(args.input)
+        if not targets:
+            print(f"{Fore.YELLOW}Warning: No targets found in input file{Style.RESET_ALL}")
+            return
+        print(f"{Fore.BLUE}[+] Loaded {len(targets)} targets from {args.input}")
     elif args.single:
-        targets = [args.single]
+        # Parse the single target
+        parsed = parse_target_line(args.single)
+        if parsed:
+            targets = [parsed]
+            print(f"{Fore.BLUE}[+] Using target: {args.single}")
+        else:
+            print(f"{Fore.RED}Error: Invalid target format. Use IP:PORT format (e.g., 192.168.1.1:443){Style.RESET_ALL}")
+            return
 
-    # Validate targets format (IP:PORT)
-    for target in targets:
-        if ":" not in target:
-            print(f"Error: Target '{target}' is not in the correct format. Use IP:PORT format.")
-            sys.exit(1)
+    with print_lock:
+        print(f"{Fore.BLUE}[+] Running scan types: {', '.join(scan_types).replace('_', ' ')}")
+        print(f"{Fore.BLUE}[+] Using {args.threads} concurrent threads")
+        if args.remediation:
+            print(f"{Fore.BLUE}[+] Running in remediation test mode")
+        print()
 
-    # Run the scanner
-    results = run_scans(targets, scan_types, args.threads)
+    # Run scans in parallel
+    results = []
 
-    # Output results
-    if args.output:
-        output_results(results, args.output, args.format)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.threads) as executor:
+        future_to_target = {executor.submit(scan_target, ip, port, scan_types): (ip, port) for ip, port in targets}
 
+        for future in concurrent.futures.as_completed(future_to_target):
+            result = future.result()
+            if result:
+                results.append(result)
+
+    # Print results to console if not suppressed
     if not args.no_console:
-        print_results(results)
+        print_scan_results(results, args.show_all_ciphers, args.remediation)
 
-    print(f"Scan completed. {len(targets)} targets scanned.")
+    # Write results to file if output file specified
+    if args.output:
+        write_output_file(results, args.output, args.format)
 
 if __name__ == "__main__":
     main()
