@@ -208,12 +208,19 @@ def scan_target(ip, port, scan_types):
     """Scan a target for all specified vulnerabilities"""
     target = f"{ip}:{port}"
 
+    # Add timestamp at the beginning of scan
+    scan_start_time = datetime.datetime.now()
+
     with print_lock:
-        print(f"{Fore.CYAN}[+] Scanning {target}...")
+        print(f"{Fore.CYAN}[+] Scanning {target}... (Started at {scan_start_time.strftime('%Y-%m-%d %H:%M:%S')})")
 
     try:
         # Run sslscan once and parse the output for all checks
         output = run_sslscan(ip, port)
+
+        # Add timestamp at the end of scan
+        scan_end_time = datetime.datetime.now()
+        scan_duration = (scan_end_time - scan_start_time).total_seconds()
 
         if output.startswith("ERROR:"):
             with print_lock:
@@ -221,18 +228,24 @@ def scan_target(ip, port, scan_types):
             return {
                 "target": target,
                 "error": output,
-                "scan_types": scan_types
+                "scan_types": scan_types,
+                "scan_start_time": scan_start_time,
+                "scan_end_time": scan_end_time,
+                "scan_duration_seconds": scan_duration
             }
 
         # Parse the output
         parsed_data = parse_sslscan_output(output)
 
-        # Prepare results
+        # Prepare results with timestamps
         result = {
             "target": target,
             "scan_types": scan_types,
             "all_ciphers": parsed_data["all_ciphers"],
             "protocol_ciphers": parsed_data["protocol_ciphers"],
+            "scan_start_time": scan_start_time,
+            "scan_end_time": scan_end_time,
+            "scan_duration_seconds": scan_duration
         }
 
         # Check for Bar Mitzvah vulnerability (RC4)
@@ -363,6 +376,21 @@ def print_vulnerability_results(vuln_name, results, show_all_ciphers, remediatio
 
     if remediation_mode:
         print(f"\n{Fore.CYAN}[*] Remediation Test Results:\n")
+    else:
+        # Print vulnerable hosts
+        if vulnerable_count > 0:
+            print(f"\n{Fore.YELLOW}[!] Hosts vulnerable to {vuln_name}:\n")
+            for target, is_vulnerable, result in results:
+                if is_vulnerable:
+                    # Add timestamp information
+                    timestamp_info = ""
+                    if "scan_start_time" in result:
+                        start_time = result["scan_start_time"].strftime("%Y-%m-%d %H:%M:%S")
+                        duration = result.get("scan_duration_seconds", 0)
+                        timestamp_info = f" (Scanned at {start_time}, duration: {duration:.2f}s)"
+
+                    print(f"{Fore.YELLOW}[!] {target} is vulnerable to {vuln_name}{timestamp_info}")
+
 
         # Print vulnerable hosts
         if vulnerable_count > 0:
@@ -391,13 +419,13 @@ def print_vulnerability_results(vuln_name, results, show_all_ciphers, remediatio
             for target, is_vulnerable, _ in results:
                 if not is_vulnerable:
                     print(f"{Fore.GREEN}    {target} - REMEDIATED")
-    else:
-        # Print vulnerable hosts
-        if vulnerable_count > 0:
-            print(f"\n{Fore.YELLOW}[!] Hosts vulnerable to {vuln_name}:\n")
-            for target, is_vulnerable, result in results:
-                if is_vulnerable:
-                    print(f"{Fore.YELLOW}[!] {target} is vulnerable to {vuln_name}")
+        else:
+            # Print vulnerable hosts
+            if vulnerable_count > 0:
+                print(f"\n{Fore.YELLOW}[!] Hosts vulnerable to {vuln_name}:\n")
+                for target, is_vulnerable, result in results:
+                    if is_vulnerable:
+                        print(f"{Fore.YELLOW}[!] {target} is vulnerable to {vuln_name}")
 
                     # For Bar Mitzvah, show RC4 ciphers
                     if vuln_name.startswith("Bar Mitzvah"):
@@ -470,15 +498,15 @@ def print_self_signed_results(results, remediation_mode):
                     print(f"{Fore.GREEN}    {target} - REMEDIATED")
                     print(f"      Subject: {result['subject']}")
                     print(f"      Issuer: {result['issuer']}")
-    else:
-        # Print vulnerable hosts
-        if vulnerable_count > 0:
-            print(f"\n{Fore.YELLOW}[!] Hosts using self-signed certificates:\n")
-            for target, is_self_signed, result in results:
-                if is_self_signed:
-                    print(f"{Fore.RED}[✗] SELF-SIGNED - VULNERABLE: {target}")
-                    print(f"    Subject: {result['subject']}")
-                    print(f"    Issuer: {result['issuer']}")
+        else:
+            # Print vulnerable hosts
+            if vulnerable_count > 0:
+                print(f"\n{Fore.YELLOW}[!] Hosts using self-signed certificates:\n")
+                for target, is_self_signed, result in results:
+                    if is_self_signed:
+                        print(f"{Fore.RED}[✗] SELF-SIGNED - VULNERABLE: {target}")
+                        print(f"    Subject: {result['subject']}")
+                        print(f"    Issuer: {result['issuer']}")
 
         # Print non-vulnerable hosts
         if vulnerable_count < len(results):
@@ -645,9 +673,16 @@ def write_json_output(results, filename):
     serializable_results = []
     for result in results:
         serializable_result = result.copy()
-        if "expiration_date" in serializable_result:
-            if serializable_result["expiration_date"]:
-                serializable_result["expiration_date"] = serializable_result["expiration_date"].isoformat()
+        # Handle existing datetime conversion
+        if "expiration_date" in serializable_result and serializable_result["expiration_date"]:
+            serializable_result["expiration_date"] = serializable_result["expiration_date"].isoformat()
+
+        # Handle new timestamp fields
+        if "scan_start_time" in serializable_result:
+            serializable_result["scan_start_time"] = serializable_result["scan_start_time"].isoformat()
+        if "scan_end_time" in serializable_result:
+            serializable_result["scan_end_time"] = serializable_result["scan_end_time"].isoformat()
+
         serializable_results.append(serializable_result)
 
     with open(filename, 'w') as f:
@@ -657,7 +692,7 @@ def write_json_output(results, filename):
 
 def write_csv_output(results, filename):
     """Write scan results to a CSV file in a simplified, grep-friendly format"""
-    fieldnames = ["target", "scan_type", "is_vulnerable"]
+    fieldnames = ["target", "scan_type", "is_vulnerable", "scan_start_time", "scan_end_time", "scan_duration_seconds"]
 
     with open(filename, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
@@ -665,10 +700,13 @@ def write_csv_output(results, filename):
 
         for result in results:
             target = result.get("target", "unknown")
+            start_time = result.get("scan_start_time", "").isoformat() if result.get("scan_start_time") else ""
+            end_time = result.get("scan_end_time", "").isoformat() if result.get("scan_end_time") else ""
+            duration = result.get("scan_duration_seconds", "")
 
             # Add SWEET32 (3DES) vulnerability
             sweet32_vulnerable = "yes" if result.get("sweet32_vulnerable", False) else "no"
-            writer.writerow([target, "SWEET32 (3DES)", sweet32_vulnerable])
+            writer.writerow([target, "SWEET32 (3DES)", sweet32_vulnerable, start_time, end_time, duration])
 
             # Add Bar Mitzvah (RC4) vulnerability
             rc4_vulnerable = "yes" if result.get("rc4_vulnerable", False) else "no"
@@ -767,8 +805,27 @@ def write_output_file(results, filename, format_type):
     else:
         print(f"{Fore.RED}[!] Unsupported output format: {format_type}")
 
+def display_banner():
+    """Display ASCII art banner for SSLScan 2.0"""
+    banner = r"""
+  ██████╗ ██████╗ ██╗     ███████╗ ██████╗ █████╗ ███╗   ██╗    ██████╗    ██████╗ 
+ ██╔════╝██╔════╝ ██║     ██╔════╝██╔════╝██╔══██╗████╗  ██║    ╚════██╗  ██╔═████╗
+ ╚█████╗ ╚█████╗  ██║     ███████╗██║     ███████║██╔██╗ ██║     █████╔╝  ██║██╔██║
+  ╚═══██╗ ╚═══██╗ ██║     ╚════██║██║     ██╔══██║██║╚██╗██║    ██╔═══╝   ████╔╝██║
+ ██████╔╝██████╔╝ ███████╗███████║╚██████╗██║  ██║██║ ╚████║    ███████╗  ╚██████╔╝
+ ╚═════╝ ╚═════╝  ╚══════╝╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═══╝    ╚══════╝   ╚═════╝ 
+
+ ╔═══════════════════════════════════════════════════════════════════════════════╗
+ ║                       SSL/TLS Vulnerability Scanner                           ║
+ ║                             By Abira Security                                 ║
+ ╚═══════════════════════════════════════════════════════════════════════════════╝
+"""
+    print(f"{Fore.CYAN}{banner}{Style.RESET_ALL}")
 
 def main():
+    # Display the ASCII art banner
+    display_banner()
+
     parser = argparse.ArgumentParser(
         description="SSL/TLS Vulnerability Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
