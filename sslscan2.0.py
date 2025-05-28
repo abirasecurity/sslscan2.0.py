@@ -814,28 +814,29 @@ Examples:
     input_group.add_argument("-i", "--input", help="Input file with IP:PORT targets, one per line")
     input_group.add_argument("-s", "--single", help="Single target in IP:PORT format")
 
+    # Add these arguments to the main parser, not to groups
     parser.add_argument("-t", "--threads", type=int, default=5, help="Number of concurrent threads (default: 5)")
     parser.add_argument("-r", "--remediation", action="store_true", help="Run in remediation test mode")
     parser.add_argument("--show-all-ciphers", action="store_true", help="Show all supported cipher suites, not just vulnerable ones")
 
-    # Scan type options
+    # Use add_argument_group without repeating descriptions that are already in the epilog
     scan_group = parser.add_argument_group("scan types")
-    scan_group.add_argument("--bar-mitzvah", action="store_true", help="Check for Bar Mitzvah vulnerability (RC4 ciphers)")
-    scan_group.add_argument("--sweet32", action="store_true", help="Check for SWEET32 vulnerability (3DES ciphers)")
-    scan_group.add_argument("--weak-signature", action="store_true", help="Check for weak signature algorithms (MD5, SHA1)")
-    scan_group.add_argument("--tls10", action="store_true", help="Check for TLSv1.0 support")
-    scan_group.add_argument("--tls11", action="store_true", help="Check for TLSv1.1 support")
-    scan_group.add_argument("--self-signed", action="store_true", help="Check for self-signed certificates")
-    scan_group.add_argument("--all", action="store_true", help="Run all scan types (default)")
-    scan_group.add_argument("--expired-cert", action="store_true", help="Check for expired SSL certificates")
+    scan_group.add_argument("--bar-mitzvah", action="store_true", help=argparse.SUPPRESS)
+    scan_group.add_argument("--sweet32", action="store_true", help=argparse.SUPPRESS)
+    scan_group.add_argument("--weak-signature", action="store_true", help=argparse.SUPPRESS)
+    scan_group.add_argument("--tls10", action="store_true", help=argparse.SUPPRESS)
+    scan_group.add_argument("--tls11", action="store_true", help=argparse.SUPPRESS)
+    scan_group.add_argument("--self-signed", action="store_true", help=argparse.SUPPRESS)
+    scan_group.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
+    scan_group.add_argument("--expired-cert", action="store_true", help=argparse.SUPPRESS)
 
-    # Add output options group here
+    # Output options group
     output_group = parser.add_argument_group("output options")
-    output_group.add_argument("-o", "--output", help="Output file path")
-    output_group.add_argument("--format", choices=["json", "csv", "xml", "yaml"], default="json", 
-                             help="Output format (default: json)")
-    output_group.add_argument("--no-console", action="store_true", 
-                             help="Suppress console output and only write to file")
+    output_group.add_argument("-o", "--output", help=argparse.SUPPRESS)
+    output_group.add_argument("--format", choices=["json", "csv", "xml", "yaml"], default="json", help=argparse.SUPPRESS)
+    output_group.add_argument("--no-console", action="store_true", help=argparse.SUPPRESS)
+
+                             
     args = parser.parse_args()
 
     # Determine which scan types to run
